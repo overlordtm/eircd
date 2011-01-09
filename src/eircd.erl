@@ -1,7 +1,5 @@
-%#!/usr/bin/env escript
-
 -module(eircd).
--behaviour(gen_server).
+-behaviour(gen_server). 
 
 -export([start_link/0]).
 -export([init/1, code_change/3, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -24,20 +22,33 @@ init([]) ->
 
 handle_call({nick, Pid, Nick}, _From, State) ->
 	case lists:keysearch(Nick, 2, State#state.users) of
-		{value, {_WrongPid, Nick}} -> {reply, fail, State}; %uporabnik s tem nickom ze obstaja
-		false -> case lists:keysearch(Pid, 1, State#state.users) of
-			{value, {Pid, OldNick}} -> {reply, ok, #state{users=[{Pid, Nick} | lists:delete({Pid, OldNick}, State#state.users)], chans=State#state.chans}};
-			false -> {reply, ok, #state{users=[{Pid, Nick} | State#state.users], chans=State#state.chans}}
-		end
+		{value, {_WrongPid, Nick}} -> 
+			{reply, fail, State}; %uporabnik s tem nickom ze obstaja
+		false -> 
+			case lists:keysearch(Pid, 1, State#state.users) of
+				{value, {Pid, OldNick}} -> 
+					{reply, ok, #state{users=[{Pid, Nick} | lists:delete({Pid, OldNick}, State#state.users)], chans=State#state.chans}};
+				false ->
+					{reply, ok, #state{users=[{Pid, Nick} | State#state.users], chans=State#state.chans}}
+			end
 	end;
 
-handle_call(Request, _From, State) ->
-	io:fwrite("Call: ~p~n", [Request]),
-	{reply, reply, State}.
+handle_call(Msg, From, State) ->
+	io:fwrite("Call from ~p: ~p~n", [From, Msg]),
+	{noreply, State}.
+
+handle_cast({chan, join, Pid, Chan}, State) ->
+	io:fwrite("Pid ~p se zeli priduziti kanalu ~s~n", [Pid, Chan]),
+	{noreply, State};
 
 handle_cast(Msg, State) -> 
 	io:fwrite("Cast: ~p~n", [Msg]),
 	{noreply, State}.
+
+handle_info({tcp, Socket, Data}, State) ->
+    io:format("tcp message: ~p~n", [Data]),
+    server:handle_irc(Socket,eirc:parse(Data)),
+    {noreply, State};
 
 handle_info(Info, State) -> 
 	io:fwrite("tcp msg: ~p~n", [Info]),

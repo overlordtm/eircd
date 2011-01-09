@@ -10,7 +10,7 @@ parse2([$: | Msg]) ->
 	[Prefix | Rest] = Tokens,
 	[Command | Params] = Rest,
 	{Prefix, Command, params(Params)};
-parse2(Msg) ->
+parse2(Msg) -> 
 	Tokens = string:tokens(Msg, " "),
 	[Command | Params] = Tokens,
 	{undefined, Command, params(Params)}.
