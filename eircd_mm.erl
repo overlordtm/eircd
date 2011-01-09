@@ -57,14 +57,30 @@ terminate(Reason, _State) ->
 handle_irc({Prefix, Cmd, Args}, State) ->
 	io:fwrite("Prefix: ~p, Cmd: ~p, Args, ~p~n", [Prefix, Cmd, Args]),
 	case Cmd of
-		"NICK" -> 	{noreply, #state{nick=hd(Args),
-					user=State#state.user,
-					host=State#state.host,
-					welcomed=State#state.welcomed,
-					socket=State#state.socket,
-					chans=State#state.chans}
-				};
-		"USER" -> 	[Nick, Username, Hostname, Realname] = Args,
+		"NICK" -> 	Nick = hd(Args),
+				case gen_server:call({global, server}, self(), Nick) of
+					ok -> 	{User, Welcome} = case State#state.user of
+							undefined -> 	{undefined, false}; %torej imamo novega uporabnika, ki se nima usernejma
+							SomeUser -> 	gen_server:cast({global, server}, {broadcast, SomeUser, "NICK", Nick}),
+							{Nick ++ "!" ++ "nekikarjetrebazracunat" ++ "@" ++ State#state.host, true}
+						end,
+						Welcomed = case {State#state.welcomed, Welcome} of
+							{false, true} -> eircd_mm:welcome(State#state.socket, Nick, User), true;
+							Otherwise -> State#state.welcomed
+						end,
+						io:fwrite("Nick je natsvljen na ~s~n", [Nick]),
+						{noreply, #state{
+							nick=Nick,
+							user=State#state.user,
+							host=State#state.host,
+							welcomed=State#state.welcomed,
+							socket=State#state.socket,
+							chans=State#state.chans
+							}
+						};
+					fail -> eircd_mm:send(State#state.socket, "NOTICE", [Nick, " is occupied! Use another one!"],
+				end;
+		"USER" -> 	[Nick, Username, Hostname, _Realname] = Args,
 				Socket = State#state.socket,
 				eircd_mm:welcome(Socket, Nick, Username),
 				{noreply, #state{nick=State#state.nick,
@@ -74,7 +90,9 @@ handle_irc({Prefix, Cmd, Args}, State) ->
 					socket=State#state.socket,
 					chans=State#state.chans}
 				};
-		_ -> io:fwrite("nepohendlan ukaz")
+		"PING" ->	Socket = State#state.socket, {ok, Srv} = inet:gethostname(), eircd_mm:send(Socket, "PONG", [Srv, Srv]), {noreply, State};	
+		"MODE" ->	io:fwrite("Prejel MODE"), Socket = State#state.socket, Nick = State#state.nick, eircd_mm:send(Socket, "MODE", [Nick, "+i"]);
+		_ -> io:fwrite("nepohendlan ukaz"), {noreply, State}
 	end;
 
 handle_irc([], State) ->
@@ -89,19 +107,17 @@ send(Socket, Cmd, Args) ->
 
 send(Socket, Servername, Cmd, Args) ->
     Data = ":" ++ Servername ++ " " ++ eirc:format(Cmd, Args),
-    io:format("sending on tcp: ~p~n", [Data]),
+    io:fwrite("sending on tcp: ~p~n", [Data]),
     gen_tcp:send(Socket, Data).
+
+
 
 welcome(Socket, Nick, User) ->
     {ok, Server} = inet:gethostname(),
     eircd_mm:send(Socket, "001", [Nick, "Welcome to the Internet Relay Network, "++User]),
-    eircd_mm:send(Socket, "002", [Nick, "your host is "++Server++", running version 1.0"]),
-    eircd_mm:send(Socket, "003", [Nick, "this server wes created on Wed June 28 2007"]),
+    eircd_mm:send(Socket, "002", [Nick, "your host is "++Server++", running version NaN"]),
+    eircd_mm:send(Socket, "003", [Nick, "this server wes created yesterday"]),
     eircd_mm:send(Socket, "375", [Nick, "- "++Server++" Message of the Day -"]),
-    eircd_mm:send(Socket, "372", [Nick, "Nous n'avions pas les mêmes pensées mais nous avions des pensées de même couleur. (Jules Renard)"]),
+    eircd_mm:send(Socket, "372", [Nick, "Ce bo tole delalo sem car :)"]),
     eircd_mm:send(Socket,"376", [Nick, "End of /MOTD command"]),
-    eircd_mm:send(Socket,"NOTICE", [Nick, "type /join channel to join a channel"]),
-    eircd_mm:send(Socket,"NOTICE", [Nick, "for example /join #fazol"]),
-    eircd_mm:send(Socket,"NOTICE", [Nick, "this is a little server and only few commands are implemented"]),
-    eircd_mm:send(Socket,"NOTICE", [Nick, "commands : /nick nickmane /user username /join #channel"]),
-    eircd_mm:send(Socket,"NOTICE", [Nick, "commands : /list /quit reason"]).
+    eircd_mm:send(Socket,"NOTICE", [Nick, "this is a little server and only few commands are implemented"]).

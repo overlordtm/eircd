@@ -22,6 +22,15 @@ init([]) ->
 	end,
 	{ok, #state{users=[], chans=[]}}.
 
+handle_call({nick, Pid, Nick}, _From, State) ->
+	case lists:keysearch(Nick, 2, State#state.users) of
+		{value, {_WrongPid, Nick}} -> {reply, fail, State}; %uporabnik s tem nickom ze obstaja
+		false -> case lists:keysearch(Pid, 1, State#state.users) of
+			{value, {Pid, OldNick}} -> {reply, ok, #state{users=[{Pid, Nick} | lists:delete({Pid, OldNick}, State#state.users)], chans=State#state.chans}};
+			false -> {reply, ok, #state{users=[{Pid, Nick} | State#state.users], chans=State#state.chans}}
+		end
+	end;
+
 handle_call(Request, _From, State) ->
 	io:fwrite("Call: ~p~n", [Request]),
 	{reply, reply, State}.

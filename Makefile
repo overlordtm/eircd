@@ -5,7 +5,7 @@
 
 ERL = erl -boot start_clean
 
-MODS = eircd
+MODS = eircd eircd_mm eirc
 
 all: compile
 
