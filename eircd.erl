@@ -1,71 +1,55 @@
+%#!/usr/bin/env escript
+
 -module(eircd).
--compile(export_all).
+-behaviour(gen_server).
 
-server() ->
-	{ok, Listen} = gen_tcp:listen(6667, [binary, {packet, 0}, {reuseaddr, true}, {active, true}]),
-	spawn(fun() -> conn_worker(Listen) end).
+-export([start_link/0]).
+-export([init/1, code_change/3, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+-export([accept_connection/1]).
 
-conn_worker(Listen) ->
-	{ok, Socket} = gen_tcp:accept(Listen),
-	spawn(fun() -> conn_worker(Listen) end),
-	loop(Socket).
+% nekj takega ko struct v C
+-record(state, {users, chans}).
 
-loop(Socket) ->
-	receive
-		{tcp, Socket, Data} ->
-			process_messages(Socket, string:tokens(binary_to_list(Data), "\r\n")),
-			loop(Socket);
-		{tcp_closed, Socket} ->
-			io:format("Server socket closed")
-	end.
+% gen_server:start_link(ServerName, Module, Args, Options) -> Result
+start_link() ->
+	gen_server:start_link({global, server}, ?MODULE, [], []).
 
-chan(Socket, Clients) ->
-	receive
-		{tcp, Socket, Data} -> chan(Socket, Clients);
-		{tcp_closed, Socket} -> io:format("Povezava prekinjena")
-	end.
-
-process_messages(Socket, []) -> true;
-process_messages(Socket, [H | T]) ->
-	case parse(H) of
-		{_Prefix, "NICK", _Args} -> true;
-		{_Prefix, "USER", _Args} -> gen_tcp:send(Socket, list_to_binary(":localhost 001 az :Welcome!\r\n:localhost 002 az :Your host ist localhost\r\n:localhost 003 :Created on lalalaa\r\n:localhost 005 :Serverinfo"));
-		{_Prefix, "MODE", _Args} -> gen_tcp:send(Socket, list_to_binary(":az MODE az :+i"));
-		{_Prefix, "PING", _Args} -> gen_tcp:send(Socket, list_to_binary(":localhost PONG localhost :localhost"));
-		{_Prefix, "QUIT", _Args} -> true;
-		{_Prefix, "JOIN", Args} -> [Chan|T] = Args, 
-			case whereis(Chan) of
-				Pid when is_number(Pid) -> Pid ! {chan, newClient, self()};
-				undefined -> Pid = spawn(fun() -> chan(Socket, self())), register(Chan, Pid)
-			end;
-		{_Prefix, "PRIVMSG", Args} -> gen_tcp:send(Socket, list_to_binary(":nick!user@host PRIVMSG #kanal :nekoSporocilo"));
-		{_Prefix, Other, Args} -> gen_tcp:send(Socket, list_to_binary(":nick!user@host PRIVMSG #kanal :neko sporocilo!"))
+init([]) ->
+	io:fwrite("Zaganjam, v init fazi ~n"),
+	case gen_tcp:listen(6667, [{packet, line}, {reuseaddr, true}]) of
+		{ok, LSocket} -> spawn(eircd, accept_connection, [LSocket]);
+		{error, Error} -> io:fwrite("Ne morem poslusat na 6667: ~p~n", [Error])
 	end,
-	process_messages(Socket, T).
+	{ok, #state{users=[], chans=[]}}.
 
-parse(Msg) ->
-	parse2(strip_crlf(Msg)).
+handle_call(Request, _From, State) ->
+	io:fwrite("Call: ~p~n", [Request]),
+	{reply, reply, State}.
 
-parse2([$: | Msg]) ->
-	Tokens = string:tokens(Msg, " "),
-	[Prefix | Rest] = Tokens,
-	[Command | Params] = Rest,
-	{Prefix, Command, params(Params)};
-parse2(Msg) ->
-	Tokens = string:tokens(Msg, " "),
-	[Command | Params] = Tokens,
-	{none, Command, params(Params)}.
+handle_cast(Msg, State) -> 
+	io:fwrite("Cast: ~p~n", [Msg]),
+	{noreply, State}.
 
-params(L) ->
-	params(L, []).
+handle_info(Info, State) -> 
+	io:fwrite("tcp msg: ~p~n", [Info]),
+	{noreply, State}.
 
-params([], P) ->
-	lists:reverse(P);
-params([[$: | HT] | T], P) ->
-	params([], [string:join([HT | T], " ") | P]);
-params([H | T], P) ->
-	params(T, [H | P]).
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
+
+terminate(_Reason, _State) -> ok.
+
+accept_connection(LSocket) ->
+	io:fwrite("Poslusam za povezave ~n"),
+	case gen_tcp:accept(LSocket) of
+		{ok, Socket} ->
+			io:fwrite("Nekod se je povezal! ~n"),
+			Ref = erlang:make_ref(),
+			{ok, Pid} = eircd_mm:start_link(Ref),
+			gen_tcp:controlling_process(Socket, Pid),
+			gen_server:cast(Pid, {create, Socket}),
+			eircd:accept_connection(LSocket);
+		{error, Error} -> 
+			io:fwrite("Napaka pri accept_connection ~p~n", [Error]),
+			ircd:accept_connection(LSocket)
+	end.
 	
-
-strip_crlf(Str) ->
-	string:strip(string:strip(Str, right, $\n), right, $\r).
