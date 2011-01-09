@@ -33,6 +33,18 @@ handle_call({nick, Pid, Nick}, _From, State) ->
 			end
 	end;
 
+handle_call({get_chan, Channel}, _From, State) ->
+	case lists:keysearch(Channel, 2, State#state.chans) of
+		{value, {Pid, Channel}} -> {reply, {ok, Pid}, State};
+		false -> {reply, fail, State}
+    end;
+
+handle_call({get_user, Nick}, _From, State) ->
+	case lists:keysearch(Nick, 2, State#state.users) of
+		{value, {Pid, Nick}} -> {reply, {ok, Pid}, State};
+		false -> {reply, fail, State}
+    end;
+
 handle_call(Msg, From, State) ->
 	io:fwrite("Call from ~p: ~p~n", [From, Msg]),
 	{noreply, State}.
@@ -40,6 +52,13 @@ handle_call(Msg, From, State) ->
 handle_cast({chan, join, Pid, Chan}, State) ->
 	io:fwrite("Pid ~p se zeli priduziti kanalu ~s~n", [Pid, Chan]),
 	{noreply, State};
+
+handle_cast({broadcast, User, Action, Args}, State) ->
+    server:broadcast(State#state.users, User, Action, Args),
+    {noreply, State};
+
+handle_cast({userquit, User}, State) ->
+    {noreply, #state{users = lists:delete(User, State#state.users), chans = State#state.chans}};
 
 handle_cast(Msg, State) -> 
 	io:fwrite("Cast: ~p~n", [Msg]),
@@ -59,10 +78,8 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 terminate(_Reason, _State) -> ok.
 
 accept_connection(LSocket) ->
-	io:fwrite("Poslusam za povezave ~n"),
 	case gen_tcp:accept(LSocket) of
 		{ok, Socket} ->
-			io:fwrite("Nekod se je povezal! ~n"),
 			Ref = erlang:make_ref(),
 			{ok, Pid} = eircd_mm:start_link(Ref),
 			gen_tcp:controlling_process(Socket, Pid),
