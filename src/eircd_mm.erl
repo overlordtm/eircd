@@ -4,7 +4,7 @@
 
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([handle_irc/2, send/3, send/4, welcome/3, quit/4, msg/4]).
+-export([handle_irc/2, send/3, send/4, welcome/3, quit/4, msg/4, join/3]).
 
 -include_lib("kernel/include/inet.hrl"). %inet: funkcije
 -record(state, {nick, user, host, welcomed, socket, chans}).
@@ -14,7 +14,6 @@ start_link(Ref) ->
 	gen_server:start_link({global, Ref}, ?MODULE, [], []).
 
 init([]) ->
-	io:fwrite("nov uporabnik je prisel! ~n"),
 	{ok, #state{}}.
 
 handle_call(userinfo, _From, State) ->
@@ -79,8 +78,6 @@ terminate(Reason, _State) ->
 	ok.
 
 handle_irc({Prefix, Cmd, Args}, State) ->
-	io:fwrite("KOMANDA: Prefix: ~p, Cmd: ~p, Args, ~p~n", [Prefix, Cmd, Args]),
-	io:fwrite("STANJE: ~p~n", [State]),
 	case Cmd of
 		"NICK" -> 	Nick = hd(Args),
 				case gen_server:call({global, server}, {nick, self(), Nick}) of
@@ -107,28 +104,46 @@ handle_irc({Prefix, Cmd, Args}, State) ->
 					fail -> eircd_mm:send(State#state.socket, "NOTICE", [Nick, " is occupied! Use another one!"]),
 							{noreply, State}
 				end;
-		"USER" -> 	[Username, Hostname, _Servername, _Realname] = Args,
+		"USER" -> 	[Username, _Hostname, _Servername, _Realname] = Args,
 					Nick = State#state.nick,
-					gen_server:cast(self(), {send, "020", [Nick, "*", "Please wait while we process your connection."]}),
+					%gen_server:cast(self(), {send, "020", [Nick, "*", "Please wait while we process your connection."]}),
 					Socket = State#state.socket,
-					{User, Welcome} = case Nick of
+					{_User, Welcome} = case Nick of
 										  undefined -> {"!"++hd(Args)++"@"++State#state.host, false};
-										  _ -> {Nick ++ "!" ++ Username ++ "@" ++ Hostname, true}
+										  _ -> {Nick ++ "!" ++ Username ++ "@" ++ State#state.host, true}
 									  end,
 					Welcomed = case {State#state.welcomed, Welcome} of
-								   {false, true} -> eircd_mm:welcome(Socket, Nick, User),
+								   {false, true} -> eircd_mm:welcome(Socket, Nick, Nick ++ "!" ++ Username ++ "@" ++ State#state.host),
 													true;
 									_ -> State#state.welcomed
 							   end,
 					{noreply, #state{nick=State#state.nick,
 						user=Username,
-						host=Hostname,
+						host=State#state.host,
 						welcomed=Welcomed,
 						socket=State#state.socket,
 						chans=State#state.chans}
 					};
-		"JOIN" ->	gen_server:cast({global, server}, {chan, join, self(), hd(Args)}),
-					{noreply, state};
+		"JOIN" ->	ChanName = hd(Args),
+					case ChanName of
+						[$# | _] -> case gen_server:call({global, server},{get_chan, ChanName}) of
+										{ok, ChanPid} -> eircd_mm:join(ChanPid, ChanName, State);
+										fail -> case gen_server:call({global, server},{create_chan, ChanName}) of
+													{ok, ChanPid} -> eircd_mm:join(ChanPid, ChanName, State);
+													_ -> io:fwrite("Napaka")
+												end
+									end;
+						Otherwise -> fail
+					end,
+					{noreply, #state{
+							nick=State#state.nick,
+							user=State#state.user,
+							host=State#state.host,
+							welcomed=State#state.welcomed,
+							socket=State#state.socket,
+							chans=[ChanName | State#state.chans]
+							}
+						};
 		"QUIT" ->	Reason = case Args of
 								[Reason2 | _] -> Reason2;
 								_ -> "no reason"
@@ -157,14 +172,13 @@ send(Socket, Cmd, Args) ->
 
 send(Socket, Prefix, Cmd, Args) ->
     Data = ":" ++ Prefix ++ " " ++ eirc:format(Cmd, Args),
-    %io:fwrite("sending on tcp: ~p~n", [Data]),
     gen_tcp:send(Socket, Data).
 
 msg(User, Dest, Cmd, Msg) ->
     case gen_server:call({global, server},{get_chan, Dest}) of
-	{ok, Pid} -> gen_server:cast(Pid,{msg, User, Cmd, Msg});
-        fail -> case gen_server:call({global, server},{get_user, Dest}) of
-	            {ok, Pid} -> gen_server:cast(Pid,{sendprefix, User, Cmd, [Msg]});
+	{ok, Pid} -> gen_server:cast(Pid, {sendprefix, User, Cmd, [Dest, Msg]});
+        fail -> case gen_server:call({global, server}, {get_user, Dest}) of
+	            {ok, Pid} -> gen_server:cast(Pid, {sendprefix, User, Cmd, [Msg]});
 	            fail -> io:fwrite("~s ne obstaja! ~n", [Dest])
 	        end
     end.
@@ -183,4 +197,12 @@ quit(Pid, _User, _Chans, Reason) ->
 	io:fwrite("POvedat moram serverju da sem sel~n"),
 	io:fwrite("Zapuscam zaradi ~p~n", [Reason]),
 	gen_server:cast(Pid, quit).
+
+join(ChanPid, ChanName, State) ->
+	gen_server:cast(ChanPid, {join, self(), State#state.nick}),
+	eircd_mm:send(State#state.socket, State#state.user, "JOIN", [ChanName]),
+	eircd_mm:send(State#state.socket, "353", [State#state.nick ++ " = " ++ ChanName, "zoki boki overlord_tm"]),
+	eircd_mm:send(State#state.socket, "366", [ChanName, "End of /NAMES list."]),
+	eircd_mm:send(State#state.socket, "333", [State#state.nick, ChanName, eirc:unix_seconds_since_epoch()]),
+	eircd_mm:send(State#state.socket, "332", [ChanName, "DEFAULT TOPIC"]).
 	

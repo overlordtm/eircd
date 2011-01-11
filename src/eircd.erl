@@ -33,8 +33,8 @@ handle_call({nick, Pid, Nick}, _From, State) ->
 			end
 	end;
 
-handle_call({get_chan, Channel}, _From, State) ->
-	case lists:keysearch(Channel, 2, State#state.chans) of
+handle_call({get_chan, Chan}, _From, State) ->
+	case lists:keysearch(Chan, 2, State#state.chans) of
 		{value, {Pid, Channel}} -> {reply, {ok, Pid}, State};
 		false -> {reply, fail, State}
     end;
@@ -45,13 +45,14 @@ handle_call({get_user, Nick}, _From, State) ->
 		false -> {reply, fail, State}
     end;
 
+handle_call({create_chan, Chan}, _From, State) ->
+	Ref = erlang:make_ref(),
+	{ok, Pid} = eircd_chan:start_link(Ref, Chan),
+	{reply, {ok, Pid}, #state{users=State#state.users, chans=[{Pid, Chan} | State#state.chans]}};
+
 handle_call(Msg, From, State) ->
 	io:fwrite("Call from ~p: ~p~n", [From, Msg]),
 	{noreply, State}.
-
-handle_cast({chan, join, Pid, Chan}, State) ->
-	io:fwrite("Pid ~p se zeli priduziti kanalu ~s~n", [Pid, Chan]),
-	{noreply, State};
 
 handle_cast({broadcast, User, Action, Args}, State) ->
     server:broadcast(State#state.users, User, Action, Args),

@@ -1,6 +1,6 @@
 -module(eirc).
 
--export([parse/1, format/2]).
+-export([parse/1, format/2, unix_seconds_since_epoch/0]).
 
 parse(Msg) ->
 	parse2(strip_crlf(Msg)).
@@ -37,3 +37,8 @@ format(Command, Args) ->
 join([], _) -> [];
 join([A], _) -> [A];
 join([H | T], Sep) -> [H, Sep, join(T, Sep)].
+
+unix_seconds_since_epoch() ->
+    LocalDateTime = calendar:datetime_to_gregorian_seconds({date(),time()}),
+    UnixEpoch = calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}}),
+    LocalDateTime - UnixEpoch.
