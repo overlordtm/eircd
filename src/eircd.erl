@@ -3,7 +3,7 @@
 
 -export([start_link/0]).
 -export([init/1, code_change/3, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
--export([accept_connection/1]).
+-export([accept_connection/1, broadcast/4]).
 
 % nekj takega ko struct v C
 -record(state, {users, chans}).
@@ -35,7 +35,7 @@ handle_call({nick, Pid, Nick}, _From, State) ->
 
 handle_call({get_chan, Chan}, _From, State) ->
 	case lists:keysearch(Chan, 2, State#state.chans) of
-		{value, {Pid, Channel}} -> {reply, {ok, Pid}, State};
+		{value, {Pid, _Chan}} -> {reply, {ok, Pid}, State};
 		false -> {reply, fail, State}
     end;
 
@@ -54,12 +54,15 @@ handle_call(Msg, From, State) ->
 	io:fwrite("Call from ~p: ~p~n", [From, Msg]),
 	{noreply, State}.
 
-handle_cast({broadcast, User, Action, Args}, State) ->
-    server:broadcast(State#state.users, User, Action, Args),
+handle_cast({broadcast, Prefix, Cmd, Args}, State) ->
+    eircd:broadcast(State#state.users, Prefix, Cmd, Args),
     {noreply, State};
 
-handle_cast({userquit, User}, State) ->
-    {noreply, #state{users = lists:delete(User, State#state.users), chans = State#state.chans}};
+handle_cast({userquit, Pid}, State) ->
+	case lists:keysearch(Pid, 1, State#state.users) of
+		{value, UserEnt} -> {noreply, #state{users = lists:delete(UserEnt, State#state.users), chans = State#state.chans}};
+		false -> {noreply, State}
+	end;
 
 handle_cast(Msg, State) -> 
 	io:fwrite("Cast: ~p~n", [Msg]),
@@ -91,3 +94,8 @@ accept_connection(LSocket) ->
 			ircd:accept_connection(LSocket)
 	end.
 	
+broadcast([], _Prefix, _Action, _Args) -> ok;
+
+broadcast([{Pid, _} | Rest], Prefix, Cmd, Args) ->
+	gen_server:cast(Pid, {sendprefix, Prefix,  Cmd, Args}),
+	eircd:broadcast(Rest, prefix, Cmd, Args).
