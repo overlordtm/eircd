@@ -114,10 +114,10 @@ welcome(Socket, Nick, User) ->
     send(Socket, Server, "001", [Nick, "Welcome to the Internet Relay Network, " ++ User]),
     send(Socket, Server, "002", [Nick, "Your host is " ++ Server ++ ", running version NaN"]),
     send(Socket, Server, "003", [Nick, "This server wes created 01.01.2011"]),
-	send(Socket, Server, "004", [Nick, Server, "eircd", "iowghraAsORTVSxNCWqBzvdHtGp", "lvhopsmntikrRcaqOALQbSeIKVfMCuzNTGj"], nocolon),
-	send(Socket, Server, "005", [Nick, "UHNAMES SAFELIST HCN MAXCHANNELS=20 CHANLIMIT=#:20 MAXLIST=b:60,e:60,I:60 NICKLEN=30 CHANNELLEN=32 TOPICLEN=307 KICKLEN=307 AWAYLEN=307 MAXTARGETS=20", "are supported by this server"]),
-	send(Socket, Server, "005", [Nick, "WALLCHOPS WATCH=128 WATCHOPTS=A SILENCE=15 MODES=12 CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beI,kfL,lj,psmntirRcOAQKVCuzNSMTG NETWORK=SiOff CASEMAPPING=ascii EXTBAN=~,cqnr ELIST=MNUCT STATUSMSG=~&@%+", "are supported by this server"]),
-	send(Socket, Server, "005", [Nick, "EXCEPTS INVEX CMDS=KNOCK,MAP,DCCALLOW,USERIP", "are supported by this server"]),
+	%send(Socket, Server, "004", [Nick, Server, "eircd", "iowghraAsORTVSxNCWqBzvdHtGp", "lvhopsmntikrRcaqOALQbSeIKVfMCuzNTGj"], nocolon),
+	%send(Socket, Server, "005", [Nick, "UHNAMES SAFELIST HCN MAXCHANNELS=20 CHANLIMIT=#:20 MAXLIST=b:60,e:60,I:60 NICKLEN=30 CHANNELLEN=32 TOPICLEN=307 KICKLEN=307 AWAYLEN=307 MAXTARGETS=20", "are supported by this server"]),
+	%send(Socket, Server, "005", [Nick, "WALLCHOPS WATCH=128 WATCHOPTS=A SILENCE=15 MODES=12 CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beI,kfL,lj,psmntirRcOAQKVCuzNSMTG NETWORK=SiOff CASEMAPPING=ascii EXTBAN=~,cqnr ELIST=MNUCT STATUSMSG=~&@%+", "are supported by this server"]),
+	%send(Socket, Server, "005", [Nick, "EXCEPTS INVEX CMDS=KNOCK,MAP,DCCALLOW,USERIP", "are supported by this server"]),
     send(Socket, Server, "375", [Nick, "Message of the Day"]),
     send(Socket, Server, "372", [Nick, "Ce bo tole delalo sem car :)"]),
     send(Socket, Server, "376", [Nick, "End of /MOTD command"]).
@@ -204,7 +204,7 @@ join([ChanName | _], State) ->
 	end.
 
 join2(ChanPid, ChanName, State) ->
-	gen_server:cast(ChanPid, {join, self(), State#state.nick}),
+	gen_server:cast(ChanPid, {join, self(), State#state.nick, State#state.username, State#state.hostname}),
 	send(State#state.socket, State#state.nick ++ "!" ++ State#state.username ++ "@" ++ State#state.hostname, "JOIN", [ChanName]),
 	send(State#state.socket, "353", [State#state.nick ++ " = " ++ ChanName, list_users(ChanPid)]),
 	send(State#state.socket, "366", [ChanName, "End of /NAMES list."]),
@@ -279,11 +279,18 @@ whois2({ChanList, Username, Hostname, Servername, Nick}, State) ->
 	send(State#state.socket, "317", [State#state.nick, Nick, 42, "seconds idile (42 is answer to everything)"]),
 	send(State#state.socket, "318", [State#state.nick, Nick, "End of /WHOIS list."]).
 
+% MODE
+
+% sprasuje po modu kanala
+mode([[$# | _]], State) ->
+	{noreply, State};
+
+% nastavljamo mode za nick
 mode([Nick, Mode], State) ->
 	Nick = State#state.nick,
 	send(State#state.socket, Nick, "MODE", [Mode]),
 	{noreply, State};
 
 mode(_Args, State) ->
-	send(State#state.socket, "NOTICE", ["Dont understan ur command"]),
+	send(State#state.socket, "NOTICE", ["Do not understand this MODE command " ++ string:join(_Args, $ )]),
 	{noreply, State}.
