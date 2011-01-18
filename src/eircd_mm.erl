@@ -18,16 +18,17 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
 
+% Middle man bewteen client, central server and channels. Handles requests from server and dispatches them
 -module(eircd_mm).
 
 -behaviour(gen_server).
 
--export([start_link/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([init/1, start_link/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -include_lib("kernel/include/inet.hrl"). %inet: funkcije
--record(state, {nick, username, hostname, welcomed, socket, chans}).
 
+% datastructure, that holds user info
+-record(state, {nick, username, hostname, welcomed, socket, chans}).
 
 start_link(Ref) ->
 	gen_server:start_link({global, Ref}, ?MODULE, [], []).
@@ -35,14 +36,17 @@ start_link(Ref) ->
 init([]) ->
 	{ok, #state{}}.
 
+% tells about client on other side
 handle_call({who}, _From, State) ->
 		{ok, Servername} = inet:gethostname(),
 		{reply, {State#state.chans, State#state.username, State#state.hostname, Servername, State#state.nick}, State};
 
+% gotta catch 'em all (calls, not pokemons)
 handle_call(Request, _From, State) ->
-	io:fwrite("Call: ~p~n", [Request]),
+	io:format("~p:handle_call: ~p~n", [?MODULE, Request]),
 	{reply, reply, State}.
 
+% used to hand over a socket from global server who created it, to middle man proces (this module) who will (ab)use it
 handle_cast({create, Socket}, State) ->
 	send(Socket, "NOTICE", ["AUTH", "*** Looking up your hostname..."]),
 	{ok, {RAddr, _RPort}} = inet:peername(Socket),
@@ -55,58 +59,64 @@ handle_cast({create, Socket}, State) ->
 			socket = Socket,
 			chans = []}};
 
+% by using this cast, some other process can send our client a message
 handle_cast({send, Action, Args}, State) ->
     send(State#state.socket, Action, Args),
     {noreply, State};
 
+% by using this cast, some other process can send our client a message, but this time with prefix
 handle_cast({sendprefix, Prefix, Action, Args}, State) ->
     send(State#state.socket, Prefix, Action, Args),
     {noreply, State};
 
+% any other casts get cought here =)
 handle_cast(Msg, State) -> 
-	io:fwrite("Ne razumem casta ~p~n", [Msg]),
+	io:format(standard_error, "~p:handle_cast: ~p~n", [?MODULE, Msg]),
 	{noreply, State}.
 
-% dobimo tcp paket, razbijemo ga v seznam po vrsticah
+% what to do when we get TCP packet?
 handle_info({tcp, _Socket, Data}, State) -> 
 	handle_irc(string:tokens(Data, "\r\n"), State);
 
-% dobimo nekaj, kar ni take oblike kot hocemo
+% handler for non tcp packets
 handle_info(Info, State) -> 
-	io:fwrite("handle_info: ~p~n", [Info]),
+	io:format(standard_error, "~p:handle_info: ~p~n", [?MODULE, Info]),
 	{noreply, State}.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
-terminate(Reason, _State) -> 
-	io:fwrite("Uporabnik zapusca vas! ~p~n", [Reason]),
+terminate(Reason, State) -> 
+	io:format(standard_error, "Uporabnik ~p vas zapusca! ~p~n", [State#state.nick, Reason]),
 	ok.
 
+% this function should handle all IRC commands (one day ...) - check RFC 1459, RFC 2810, RFC 2811, RFC 2812, RFC 2813
 handle_irc({_Prefix, Cmd, Args}, State) ->
 	case Cmd of
-		"NICK" -> 	nick(Args, State);
-		"USER" -> 	user(Args, State);
-		"JOIN" ->	join(Args, State);		
-		"QUIT" ->	quit(Args, State);
-		"PART" ->	part(Args, State);
+		"NICK" -> 	nick(Args, State); % nick change
+		"USER" -> 	user(Args, State); % set user info
+		"JOIN" ->	join(Args, State); % join a channel
+		"QUIT" ->	quit(Args, State); % quit irc
+		"PART" ->	part(Args, State); % quit channel
 		"PING" ->	{ok, Srv} = inet:gethostname(),
 					gen_server:cast(self(), {send, "PONG", [Srv, hd(Args)]}),
-					{noreply, State};
+					{noreply, State}; % play some TCP ping pong with client, showing him you are still alive
 		"PRIVMSG" -> [Dest, Msg | _] = Args,
-					 msg(State#state.nick ++ "!" ++ State#state.username ++ "@" ++ State#state.hostname, Dest, Cmd, Msg),
-					 {noreply, State};
-		"WHO" ->	who(Args, State);
-		"WHOIS" ->	whois(Args, State);
+					 privmsg(State#state.nick ++ "!" ++ State#state.username ++ "@" ++ State#state.hostname, Dest, Cmd, Msg),
+					 {noreply, State}; % send message to user or channel
+		"WHO" ->	who(Args, State); % play big brother
+		"WHOIS" ->	whois(Args, State); % play big brother
 		"MODE" -> mode(Args, State);
-		_Anything -> send(State#state.socket, "421", [State#state.nick, "Unknown command " ++ Cmd]),
-					 {noreply, State}
+		_Anything -> send(State#state.socket, "421", [State#state.nick, "Unknown (unsupported) command " ++ Cmd]),
+					 {noreply, State} % tell client we are only 10 years old and we dont knwo what they want
 	end;
 
+% first, we have to parse raw string to get input data for above command
 handle_irc([], State) ->
 	State;
 
 handle_irc([H | T], State) ->
 	handle_irc(T, handle_irc(eirc:parse(H), State)).
+
 
 send(Socket, Cmd, Args) ->
 	{ok, Server} = inet:gethostname(),
@@ -120,7 +130,8 @@ send(Socket, Prefix, Cmd, Args, nocolon) ->
     Data = ":" ++ Prefix ++ " " ++ eirc:format(Cmd, Args, nocolon),
     gen_tcp:send(Socket, Data).
 
-msg(User, Dest, Cmd, Msg) ->
+% PRIVMSG <Rcpt> <Message>
+privmsg(User, Dest, Cmd, Msg) ->
     case gen_server:call({global, server},{get_chan, Dest}) of
 	{ok, Pid} -> gen_server:cast(Pid, {sendprefix, self(), User, Cmd, [Dest, Msg]});
         fail -> case gen_server:call({global, server}, {get_user, Dest}) of
@@ -129,6 +140,7 @@ msg(User, Dest, Cmd, Msg) ->
 	        end
     end.
 
+% send our user a welcome text
 welcome(Socket, Nick, User) ->
     {ok, Server} = inet:gethostname(),
     send(Socket, Server, "001", [Nick, "Welcome to the Internet Relay Network, " ++ User]),

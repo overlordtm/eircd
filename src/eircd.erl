@@ -75,7 +75,7 @@ handle_call(Msg, From, State) ->
 	{noreply, State}.
 
 handle_cast({broadcast, Prefix, Cmd, Args}, State) ->
-    eircd:broadcast(State#state.users, Prefix, Cmd, Args),
+   	broadcast(State#state.users, Prefix, Cmd, Args),
     {noreply, State};
 
 handle_cast({userquit, Pid}, State) ->
@@ -118,4 +118,4 @@ broadcast([], _Prefix, _Action, _Args) -> ok;
 
 broadcast([{Pid, _} | Rest], Prefix, Cmd, Args) ->
 	gen_server:cast(Pid, {sendprefix, Prefix,  Cmd, Args}),
-	eircd:broadcast(Rest, prefix, Cmd, Args).
+	eircd:broadcast(Rest, Prefix, Cmd, Args).
