@@ -102,7 +102,7 @@ send(Socket, Prefix, Cmd, Args, nocolon) ->
 
 msg(User, Dest, Cmd, Msg) ->
     case gen_server:call({global, server},{get_chan, Dest}) of
-	{ok, Pid} -> gen_server:cast(Pid, {sendprefix, User, Cmd, [Dest, Msg]});
+	{ok, Pid} -> gen_server:cast(Pid, {sendprefix, self(), User, Cmd, [Dest, Msg]});
         fail -> case gen_server:call({global, server}, {get_user, Dest}) of
 	            {ok, Pid} -> gen_server:cast(Pid, {sendprefix, User, Cmd, [Dest, Msg]});
 	            fail -> io:fwrite("~s ne obstaja! ~n", [Dest])
