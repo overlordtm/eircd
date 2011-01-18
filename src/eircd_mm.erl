@@ -1,10 +1,29 @@
+%% Copyright (C) 2011 by Andraz Vrhovec <andraz@vrhovec.si>
+%% 
+%% Permission is hereby granted, free of charge, to any person obtaining a copy
+%% of this software and associated documentation files (the "Software"), to deal
+%% in the Software without restriction, including without limitation the rights
+%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+%% copies of the Software, and to permit persons to whom the Software is
+%% furnished to do so, subject to the following conditions:
+%% 
+%% The above copyright notice and this permission notice shall be included in
+%% all copies or substantial portions of the Software.
+%% 
+%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+%% THE SOFTWARE.
+
 -module(eircd_mm).
 
 -behaviour(gen_server).
 
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
-%-export([handle_irc/2, send/3, send/4, send/5, welcome/3, quit/2, quit_chans/3, msg/4, join/2, join2/3, nick/2, user/2, who/2, who_single/2, who_chan/2, who_chan_loop/2, who_user/2, mode/2]).
 
 -include_lib("kernel/include/inet.hrl"). %inet: funkcije
 -record(state, {nick, username, hostname, welcomed, socket, chans}).
@@ -69,6 +88,7 @@ handle_irc({_Prefix, Cmd, Args}, State) ->
 		"USER" -> 	user(Args, State);
 		"JOIN" ->	join(Args, State);		
 		"QUIT" ->	quit(Args, State);
+		"PART" ->	part(Args, State);
 		"PING" ->	{ok, Srv} = inet:gethostname(),
 					gen_server:cast(self(), {send, "PONG", [Srv, hd(Args)]}),
 					{noreply, State};
@@ -181,8 +201,20 @@ quit([Reason | _], State) ->
 
 quit_chans([], _Prefix, _Reason) -> ok;
 quit_chans([{CPid, _CName} | Rest], Prefix, Reason) ->
-	gen_server:cast(CPid, {userquit, self(), Prefix, Reason}),
+	gen_server:cast(CPid, {part, self(), Prefix, Reason}),
 	quit_chans(Rest, Prefix, Reason).
+
+% PART <chan> <reason>
+part([Chan, Reason | _], State) ->
+	case lists:keyfind(Chan, 2, State#state.chans) of
+		false -> ignore_him;
+		{ChanPid, ChanName} -> case Reason of
+								   [] -> RealReason = "Bye.";
+								   _  -> RealReason = Reason
+							   end,
+							   gen_server:cast(ChanPid, {part, self(), State#state.nick ++ "!" ++ State#state.username ++ "@" ++ State#state.hostname, RealReason})
+	end,
+	{noreply, State}.
 
 % JOIN <chan>
 
